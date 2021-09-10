@@ -106,6 +106,8 @@ def training_loop(
     resume_pkl              = None,     # Network pickle to resume training from.
     abort_fn                = None,     # Callback function for determining whether to abort training.
     progress_fn             = None,     # Callback function for updating training progress.
+    last_tick            = -1,
+    last_nimg            = 0,
 ):
     assert minibatch_size % (num_gpus * minibatch_gpu) == 0
     start_time = time.time()
@@ -220,8 +222,8 @@ def training_loop(
         progress_fn(0, total_kimg)
     tick_start_time = time.time()
     maintenance_time = tick_start_time - start_time
-    cur_nimg = 0
-    cur_tick = -1
+    cur_nimg = last_nimg
+    cur_tick = last_tick
     tick_start_nimg = cur_nimg
     running_mb_counter = 0
 

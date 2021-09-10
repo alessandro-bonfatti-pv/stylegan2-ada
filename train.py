@@ -32,7 +32,8 @@ def setup_training_options(
     # General options (not included in desc).
     gpus       = None, # Number of GPUs: <int>, default = 1 gpu
     snap       = None, # Snapshot interval: <int>, default = 50 ticks
-
+    lrate      = None,
+    
     # Training dataset.
     data       = None, # Training dataset (required): <path>
     res        = None, # Override dataset resolution: <int>, default = highest available
@@ -60,9 +61,13 @@ def setup_training_options(
     # Transfer learning.
     resume     = None, # Load previous network: 'noresume' (default), 'ffhq256', 'ffhq512', 'ffhq1024', 'celebahq256', 'lsundog256', <file>, <url>
     freezed    = None, # Freeze-D: <int>, default = 0 discriminator layers
+    last_tick  = -1,
+    last_nimg  = 0,
 ):
     # Initialize dicts.
     args = dnnlib.EasyDict()
+    args.last_tick = last_tick
+    args.last_nimg = last_nimg
     args.G_args = dnnlib.EasyDict(func_name='training.networks.G_main')
     args.D_args = dnnlib.EasyDict(func_name='training.networks.D_main')
     args.G_opt_args = dnnlib.EasyDict(beta1=0.0, beta2=0.99)
@@ -181,6 +186,8 @@ def setup_training_options(
         spec.gamma = 0.0002 * (res ** 2) / spec.mb # heuristic formula
         spec.ema = spec.mb * 10 / 32
 
+    spec.lrate = spec.lrate if lrate is None else lrate #override with param
+
     args.total_kimg = spec.kimg
     args.minibatch_size = spec.mb
     args.minibatch_gpu = spec.mb // spec.ref_gpus
@@ -246,7 +253,7 @@ def setup_training_options(
 
     if p is not None:
         assert isinstance(p, float)
-        if aug != 'fixed':
+        if aug != 'fixed' and aug != 'ada':
             raise UserError('--p can only be specified with --aug=fixed')
         if not 0 <= p <= 1:
             raise UserError('--p must be between 0 and 1')
@@ -518,6 +525,7 @@ def main():
     group.add_argument('--gpus', help='Number of GPUs to use (default: 1 gpu)', type=int, metavar='INT')
     group.add_argument('--snap', help='Snapshot interval (default: 50 ticks)', type=int, metavar='INT')
     group.add_argument('--seed', help='Random seed (default: %(default)s)', type=int, default=1000, metavar='INT')
+    group.add_argument('--lrate', help='Learning Rate', type=float, metavar='FLOAT')
     group.add_argument('-n', '--dry-run', help='Print training options and exit', action='store_true', default=False)
 
     group = parser.add_argument_group('training dataset')
@@ -547,6 +555,8 @@ def main():
     group = parser.add_argument_group('transfer learning')
     group.add_argument('--resume',  help='Resume from network pickle (default: noresume)')
     group.add_argument('--freezed', help='Freeze-D (default: 0 discriminator layers)', type=int, metavar='INT')
+    group.add_argument('--last_tick',    help='Last executed Tick', type=int, metavar='INT')
+    group.add_argument('--last_nimg',    help='Lask number of processed images', type=int, metavar='INT')
 
     args = parser.parse_args()
     try:
