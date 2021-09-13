@@ -32,12 +32,13 @@ def setup_training_options(
     # General options (not included in desc).
     gpus       = None, # Number of GPUs: <int>, default = 1 gpu
     snap       = None, # Snapshot interval: <int>, default = 50 ticks
-    lrate      = None,
-    
+
     # Training dataset.
     data       = None, # Training dataset (required): <path>
     res        = None, # Override dataset resolution: <int>, default = highest available
     mirror     = None, # Augment dataset with x-flips: <bool>, default = False
+    mirrory    = None, # Augment dataset with y-flips: <bool>, default = False
+    use_raw    = None, 
 
     # Metrics (not included in desc).
     metrics    = None, # List of metric names: [], ['fid50k_full'] (default), ...
@@ -45,8 +46,11 @@ def setup_training_options(
 
     # Base config.
     cfg        = None, # Base config: 'auto' (default), 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar', 'cifarbaseline'
+    lrate      = None, # Override learning rate
+    ttur       = None, # Use Two Time-Scale Update Rule
     gamma      = None, # Override R1 gamma: <float>, default = depends on cfg
     kimg       = None, # Override training duration: <int>, default = depends on cfg
+    topk      = None, # set top-k percentage
 
     # Discriminator augmentation.
     aug        = None, # Augmentation mode: 'ada' (default), 'noaug', 'fixed', 'adarv'
@@ -94,9 +98,9 @@ def setup_training_options(
     args.image_snapshot_ticks = snap
     args.network_snapshot_ticks = snap
 
-    # -----------------------------------
-    # Training dataset: data, res, mirror
-    # -----------------------------------
+    # ---------------------------------------------
+    # Training dataset: data, res, mirror, mirrory
+    # ---------------------------------------------
 
     assert data is not None
     assert isinstance(data, str)
@@ -107,6 +111,7 @@ def setup_training_options(
 
     with tf.Graph().as_default(), tflib.create_session().as_default(): # pylint: disable=not-context-manager
         args.train_dataset_args = dnnlib.EasyDict(path=data, max_label_size='full')
+        args.train_dataset_args.use_raw = use_raw
         dataset_obj = dataset.load_dataset(**args.train_dataset_args) # try to load the data and see what comes out
         args.train_dataset_args.resolution = dataset_obj.shape[-1] # be explicit about resolution
         args.train_dataset_args.max_label_size = dataset_obj.label_size # be explicit about label size
@@ -127,11 +132,19 @@ def setup_training_options(
 
     if mirror is None:
         mirror = False
-    else:
-        assert isinstance(mirror, bool)
-        if mirror:
-            desc += '-mirror'
+    assert isinstance(mirror, bool)
+    if mirror:
+        desc += '-mirror'
     args.train_dataset_args.mirror_augment = mirror
+
+    if mirrory is None:
+        mirrory = False
+    assert isinstance(mirrory, bool)
+    if mirrory:
+        desc += '-mirrory'
+    args.train_dataset_args.mirror_augment_v = mirrory
+
+    args.train_dataset_args.use_raw = use_raw
 
     # ----------------------------
     # Metrics: metrics, metricdata
@@ -166,6 +179,14 @@ def setup_training_options(
 
     cfg_specs = {
         'auto':          dict(ref_gpus=-1, kimg=25000,  mb=-1, mbstd=-1, fmaps=-1,  lrate=-1,     gamma=-1,   ema=-1,  ramp=0.05, map=2), # populated dynamically based on 'gpus' and 'res'
+        'aydao':     dict(ref_gpus=2,  kimg=25000,  mb=16, mbstd=8,  fmaps=1,   lrate=0.002,  gamma=10,   ema=10,  ramp=None, map=8), # uses mixed-precision, 11GB GPU
+        '11gb-gpu':     dict(ref_gpus=1,  kimg=25000,  mb=4, mbstd=4,  fmaps=1,   lrate=0.002,  gamma=10,   ema=10,  ramp=None, map=8), # uses mixed-precision, 11GB GPU
+        '11gb-gpu-complex':     dict(ref_gpus=1,  kimg=25000,  mb=4, mbstd=4,  fmaps=1,   lrate=0.002,  gamma=10,   ema=10,  ramp=None, map=8), # uses mixed-precision, 11GB GPU
+        '24gb-gpu':     dict(ref_gpus=1,  kimg=25000,  mb=8, mbstd=8,  fmaps=1,   lrate=0.002,  gamma=10,   ema=10,  ramp=None, map=8), # uses mixed-precision, 24GB GPU
+        '24gb-gpu-complex':     dict(ref_gpus=1,  kimg=25000,  mb=8, mbstd=8,  fmaps=1,   lrate=0.002,  gamma=10,   ema=10,  ramp=None, map=8), # uses mixed-precision, 24GB GPU
+        '24gb-2gpu-complex':     dict(ref_gpus=2,  kimg=25000,  mb=16, mbstd=8,  fmaps=1,   lrate=0.002,  gamma=10,   ema=10,  ramp=None, map=8), # uses mixed-precision, 24GB GPU
+        '48gb-gpu':     dict(ref_gpus=1,  kimg=25000,  mb=16, mbstd=16,  fmaps=1,   lrate=0.002,  gamma=10,   ema=10,  ramp=None, map=8), # uses mixed-precision, 48GB GPU
+        '48gb-2gpu':     dict(ref_gpus=2,  kimg=25000,  mb=32, mbstd=16,  fmaps=1,   lrate=0.002,  gamma=10,   ema=10,  ramp=None, map=8), # uses mixed-precision, 48GB GPU
         'stylegan2':     dict(ref_gpus=8,  kimg=25000,  mb=32, mbstd=4,  fmaps=1,   lrate=0.002,  gamma=10,   ema=10,  ramp=None, map=8), # uses mixed-precision, unlike original StyleGAN2
         'paper256':      dict(ref_gpus=8,  kimg=25000,  mb=64, mbstd=8,  fmaps=0.5, lrate=0.0025, gamma=1,    ema=20,  ramp=None, map=8),
         'paper512':      dict(ref_gpus=8,  kimg=25000,  mb=64, mbstd=8,  fmaps=1,   lrate=0.0025, gamma=0.5,  ema=20,  ramp=None, map=8),
@@ -186,8 +207,6 @@ def setup_training_options(
         spec.gamma = 0.0002 * (res ** 2) / spec.mb # heuristic formula
         spec.ema = spec.mb * 10 / 32
 
-    spec.lrate = spec.lrate if lrate is None else lrate #override with param
-
     args.total_kimg = spec.kimg
     args.minibatch_size = spec.mb
     args.minibatch_gpu = spec.mb // spec.ref_gpus
@@ -202,10 +221,37 @@ def setup_training_options(
     args.G_args.num_fp16_res = args.D_args.num_fp16_res = 4 # enable mixed-precision training
     args.G_args.conv_clamp = args.D_args.conv_clamp = 256 # clamp activations to avoid float16 overflow
 
-    if cfg == 'cifar':
+    if cfg == 'aydao':
+        # disable path length and style mixing regularization
+        args.loss_args.pl_weight = 0
+        args.G_args.style_mixing_prob = None
+
+        # double generator capacity
+        args.G_args.fmap_base = 32 << 10
+        args.G_args.fmap_max = 1024
+
+        # enable top k training
+        args.loss_args.G_top_k = True
+        # args.loss_args.G_top_k_gamma = 0.99 # takes ~70% of full training from scratch to decay to 0.5
+        # args.loss_args.G_top_k_gamma = 0.9862 # takes 12500 kimg to decay to 0.5 (~1/2 of total_kimg when training from scratch)
+        args.loss_args.G_top_k_gamma = 0.9726 # takes 6250 kimg to decay to 0.5 (~1/4 of total_kimg when training from scratch)
+        args.loss_args.G_top_k_frac = 0.5
+
+        # reduce in-memory size, you need a BIG GPU for this model
+        args.minibatch_gpu = 4 # probably will need to set this pretty low with such a large G, higher values work better for top-k training though
+        args.G_args.num_fp16_res = 6 # making more layers fp16 can help as well
+
+    if cfg == 'cifar' or cfg.split('-')[-1] == 'complex':
         args.loss_args.pl_weight = 0 # disable path length regularization
         args.G_args.style_mixing_prob = None # disable style mixing
         args.D_args.architecture = 'orig' # disable residual skip connections
+
+    if lrate is not None:
+        assert isinstance(lrate, float)
+        args.G_opt_args.learning_rate = args.D_opt_args.learning_rate = lrate
+
+    if ttur is not None:
+    	args.D_opt_args.learning_rate = (args.G_opt_args.learning_rate * 2.0)
 
     if gamma is not None:
         assert isinstance(gamma, float)
@@ -220,6 +266,12 @@ def setup_training_options(
             raise UserError('--kimg must be at least 1')
         desc += f'-kimg{kimg:d}'
         args.total_kimg = kimg
+
+    if topk is not None:
+    	assert isinstance(topk, float)
+    	args.loss_args.G_top_k = True
+    	args.loss_args.G_top_k_gamma = topk
+    	args.loss_args.G_top_k_frac = 0.5
 
     # ---------------------------------------------------
     # Discriminator augmentation: aug, p, target, augpipe
@@ -253,7 +305,7 @@ def setup_training_options(
 
     if p is not None:
         assert isinstance(p, float)
-        if aug != 'fixed' and aug != 'ada':
+        if aug != 'fixed':
             raise UserError('--p can only be specified with --aug=fixed')
         if not 0 <= p <= 1:
             raise UserError('--p must be between 0 and 1')
@@ -279,17 +331,17 @@ def setup_training_options(
 
     augpipe_specs = {
         'prototype':    dict(xflip=1, scale=1, aniso=1, xfrac=1, brightness=1, contrast=1),
-        'blit':         dict(xflip=1, rotate90=1, xint=1),
-        'geom':         dict(scale=1, rotate=1, aniso=1, xfrac=1),
-        'color':        dict(brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1),
-        'filter':       dict(imgfilter=1),
-        'noise':        dict(noise=1),
-        'cutout':       dict(cutout=1),
-        'bg':           dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1),
-        'bgc':          dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1),
-        'bgcf':         dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1, imgfilter=1),
-        'bgcfn':        dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1, imgfilter=1, noise=1),
-        'bgcfnc':       dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1, imgfilter=1, noise=1, cutout=1),
+        'blit':     dict(xflip=1, rotate90=1, xint=1),
+        'geom':     dict(scale=1, rotate=1, aniso=1, xfrac=1),
+        'color':    dict(brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1),
+        'filter':   dict(imgfilter=1),
+        'noise':    dict(noise=1),
+        'cutout':   dict(cutout=1),
+        'bg':       dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1),
+        'bgc':      dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1),
+        'bgcf':     dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1, imgfilter=1),
+        'bgcfn':    dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1, imgfilter=1, noise=1),
+        'bgcfnc':   dict(xflip=1, rotate90=1, xint=1, scale=1, rotate=1, aniso=1, xfrac=1, brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1, imgfilter=1, noise=1, cutout=1),
     }
 
     assert augpipe in augpipe_specs
@@ -389,6 +441,12 @@ def setup_training_options(
         'ffhq1024':     'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada/pretrained/transfer-learning-source-nets/ffhq-res1024-mirror-stylegan2-noaug.pkl',
         'celebahq256':  'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada/pretrained/transfer-learning-source-nets/celebahq-res256-mirror-paper256-kimg100000-ada-target0.5.pkl',
         'lsundog256':   'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada/pretrained/transfer-learning-source-nets/lsundog-res256-paper256-kimg100000-noaug.pkl',
+        'afhqcat512':      'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada/pretrained/afhqcat.pkl',
+        'afhqdog512':      'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada/pretrained/afhqdog.pkl',
+        'afhqwild512':     'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada/pretrained/afhqwild.pkl',
+        'brecahad512':     'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada/pretrained/brecahad.pkl',
+        'cifar10':      'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada/pretrained/cifar10.pkl',
+        'metfaces':     'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada/pretrained/metfaces.pkl',
     }
 
     assert resume is None or isinstance(resume, str)
@@ -509,6 +567,12 @@ transfer learning source networks (--resume):
   ffhq1024       FFHQ trained at 1024x1024 resolution.
   celebahq256    CelebA-HQ trained at 256x256 resolution.
   lsundog256     LSUN Dog trained at 256x256 resolution.
+  afhqcat512     AFHQ Cat trained at 512x512 resolution.
+  afhqdog512     AFHQ Dog trained at 512x512 resolution.
+  afhqwild512    AFHQ Wild trained at 512x512 resolution.
+  brecahad512    BreCaHAD trained at 512x512 resolution.
+  cifar10        CIFAR10 trained at 32x32 resolution.
+  metfaces512    MetFaces trained at 512x512 resolution.
   <path or URL>  Custom network pickle.
 '''
 
@@ -526,22 +590,26 @@ def main():
     group.add_argument('--gpus', help='Number of GPUs to use (default: 1 gpu)', type=int, metavar='INT')
     group.add_argument('--snap', help='Snapshot interval (default: 50 ticks)', type=int, metavar='INT')
     group.add_argument('--seed', help='Random seed (default: %(default)s)', type=int, default=1000, metavar='INT')
-    group.add_argument('--lrate', help='Learning Rate', type=float, metavar='FLOAT')
     group.add_argument('-n', '--dry-run', help='Print training options and exit', action='store_true', default=False)
 
     group = parser.add_argument_group('training dataset')
     group.add_argument('--data',   help='Training dataset path (required)', metavar='PATH', required=True)
     group.add_argument('--res',    help='Dataset resolution (default: highest available)', type=int, metavar='INT')
     group.add_argument('--mirror', help='Augment dataset with x-flips (default: false)', type=_str_to_bool, metavar='BOOL')
+    group.add_argument('--mirrory', help='Augment dataset with y-flips (default: false)', type=_str_to_bool, metavar='BOOL')
+    group.add_argument('--use-raw', help='Use raw image dataset, i.e. created from create_from_images_raw (default: %(default)s)', default=False, metavar='BOOL', type=_str_to_bool)
 
     group = parser.add_argument_group('metrics')
     group.add_argument('--metrics',    help='Comma-separated list or "none" (default: fid50k_full)', type=_parse_comma_sep, metavar='LIST')
     group.add_argument('--metricdata', help='Dataset to evaluate metrics against (optional)', metavar='PATH')
 
     group = parser.add_argument_group('base config')
-    group.add_argument('--cfg',   help='Base config (default: auto)', choices=['auto', 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar', 'cifarbaseline'])
+    group.add_argument('--cfg',   help='Base config (default: auto)', choices=['auto', '11gb-gpu','11gb-gpu-complex', '24gb-gpu','24gb-gpu-complex', '48gb-gpu','48gb-2gpu', 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar', 'cifarbaseline', 'aydao'])
+    group.add_argument('--lrate', help='Override learning rate', type=float, metavar='FLOAT')
+    group.add_argument('--ttur', help='Use Two Time-Scale Update Rule (double learning rate for discriminator) (default: false)', type=_str_to_bool, metavar='BOOL')
     group.add_argument('--gamma', help='Override R1 gamma', type=float, metavar='FLOAT')
     group.add_argument('--kimg',  help='Override training duration', type=int, metavar='INT')
+    group.add_argument('--topk',  help='utilize top-k training', type=int, metavar='FLOAT')
 
     group = parser.add_argument_group('discriminator augmentation')
     group.add_argument('--aug',    help='Augmentation mode (default: ada)', choices=['noaug', 'ada', 'fixed', 'adarv'])
