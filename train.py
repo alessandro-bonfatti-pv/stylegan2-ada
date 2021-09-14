@@ -255,8 +255,8 @@ def setup_training_options(
         assert isinstance(p, float)
         if aug != 'fixed' and aug != 'ada':
             raise UserError('--p can only be specified with --aug=fixed')
-        if not 0 <= p <= 1:
-            raise UserError('--p must be between 0 and 1')
+        if not 0 <= p:
+            raise UserError('--p must be more than 0')
         desc += f'-p{p:g}'
         args.augment_args.initial_strength = p
 
