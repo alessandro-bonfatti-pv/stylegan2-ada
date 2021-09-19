@@ -624,8 +624,8 @@ def main():
     group = parser.add_argument_group('transfer learning')
     group.add_argument('--resume',  help='Resume from network pickle (default: noresume)')
     group.add_argument('--freezed', help='Freeze-D (default: 0 discriminator layers)', type=int, metavar='INT')
-    group.add_argument('--last_tick',    help='Last executed Tick', type=int, metavar='INT')
-    group.add_argument('--last_nimg',    help='Lask number of processed images', type=int, metavar='INT')
+    group.add_argument('--last_tick',    help='Last executed Tick', type=int, metavar='INT', default=-1)
+    group.add_argument('--last_nimg',    help='Lask number of processed images', type=int, metavar='INT', default=0)
 
     args = parser.parse_args()
     try:
