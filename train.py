@@ -43,7 +43,6 @@ def setup_training_options(
 
     #res        = None, # Override dataset resolution: <int>, default = highest available
     mirror     = None, # Augment dataset with x-flips: <bool>, default = False
-    mirrory    = None, # Augment dataset with y-flips: <bool>, default = False
 
     # Metrics (not included in desc).
     metrics    = None, # List of metric names: [], ['fid50k_full'] (default), ...
@@ -617,7 +616,7 @@ def main():
     group = parser.add_argument_group('training dataset')
     group.add_argument('--data',   help='Training dataset path (required)', metavar='PATH', required=True)
     ###
-    group.add_argument('--use_raw', help='Use raw image dataset, i.e. created from create_from_images_raw (default: %(default)s)', default=True, metavar='BOOL', type=_str_to_bool)
+    group.add_argument('--use_raw', help='Use raw image dataset, i.e. created from create_from_images_raw (default: %(default)s)', default=False, metavar='BOOL', type=_str_to_bool)
     group.add_argument('--min_h', help='lowest dim of height', default=4, type=int, metavar='INT')
     group.add_argument('--min_w', help='lowest dim of width', default=4, type=int, metavar='INT')
     group.add_argument('--res_log2', help='multiplier for image size, the training image size (height, width) should be (min_h * 2**res_log2, min_w * 2**res_log2)', default=4, type=int, metavar='INT')
