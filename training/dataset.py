@@ -300,11 +300,11 @@ class TFRecordDataset:
 #----------------------------------------------------------------------------
 # Construct a dataset object using the given options.
 
-def load_dataset(path=None, use_raw=False, min_h=4, min_w=4, res_log2=7, max_images=None, max_label_size=0, mirror_augment=False, repeat=True, shuffle=True, seed=None):
+def load_dataset(path=None, use_raw=False, min_h=4, min_w=4, res_log2=7, max_images=None, max_label_size=0, mirror_augment=False, mirror_augment_v=False, repeat=True, shuffle=True, seed=None):
     _ = seed
     assert os.path.isdir(path)
     return TFRecordDataset(
-        mirror_augment=mirror_augment, mirror_augment_v=mirror_augment_v, repeat=repeat, shuffle=shuffle)
-        tfrecord_dir=path, use_raw=use_raw, min_h=min_h, min_w=min_w, res_log2=res_log2, max_images=max_images, max_label_size=max_label_size,
+            tfrecord_dir=path, use_raw=use_raw, min_h=min_h, min_w=min_w, res_log2=res_log2, max_images=max_images, max_label_size=max_label_size,
+            mirror_augment=mirror_augment, mirror_augment_v=mirror_augment_v, repeat=repeat, shuffle=shuffle)
 
 #----------------------------------------------------------------------------
