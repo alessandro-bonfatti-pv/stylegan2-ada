@@ -20,6 +20,23 @@ from dnnlib.tflib.autosummary import autosummary
 
 from training import dataset
 
+import glob
+import re
+#-------------- functions from Miscellaneous
+
+def locate_latest_pkl(result_dir):
+    splitdir = os.path.split(result_dir)
+    result_dir = splitdir[0]
+    print('finding latest pickle file in - ',result_dir)
+    allpickles = sorted(glob.glob(os.path.join(result_dir, '0*', 'network-*.pkl')))
+    if len(allpickles) == 0:
+        return None, 0.0
+    latest_pickle = allpickles[-1]
+    resume_run_id = os.path.basename(os.path.dirname(latest_pickle))
+    RE_KIMG = re.compile('network-snapshot-(\d+).pkl')
+    kimg = int(RE_KIMG.match(os.path.basename(latest_pickle)).group(1))
+    return (latest_pickle, float(kimg))
+
 #----------------------------------------------------------------------------
 # Select size and contents of the image snapshot grids that are exported
 # periodically during training.
@@ -101,13 +118,12 @@ def training_loop(
     D_reg_interval          = 16,       # How often the perform regularization for D? Ignored if lazy_regularization=False.
     total_kimg              = 25000,    # Total length of the training, measured in thousands of real images.
     kimg_per_tick           = 4,        # Progress snapshot interval.
-    image_snapshot_ticks    = 50,       # How often to save image snapshots? None = only save 'reals.png' and 'fakes-init.png'.
+    image_snapshot_ticks    = 50,       # How often to save image snapshots? None = only save 'reals.jpg' and 'fakes-init.jpg'.
     network_snapshot_ticks  = 50,       # How often to save network snapshots? None = only save 'networks-final.pkl'.
     resume_pkl              = None,     # Network pickle to resume training from.
     abort_fn                = None,     # Callback function for determining whether to abort training.
     progress_fn             = None,     # Callback function for updating training progress.
-    last_tick            = -1,
-    last_nimg            = 0,
+    last_tick            = -1
 ):
     assert minibatch_size % (num_gpus * minibatch_gpu) == 0
     start_time = time.time()
@@ -123,7 +139,13 @@ def training_loop(
         G = tflib.Network('G', num_channels=training_set.shape[0], resolution=training_set.shape[1], label_size=training_set.label_size, **G_args)
         D = tflib.Network('D', num_channels=training_set.shape[0], resolution=training_set.shape[1], label_size=training_set.label_size, **D_args)
         Gs = G.clone('Gs')
+        resume_kimg = 0
+        print('resume_pkl = ',resume_pkl)
         if resume_pkl is not None:
+            #####
+            if resume_pkl == 'latest':
+                resume_pkl, resume_kimg = locate_latest_pkl(run_dir)
+            #####
             print(f'Resuming from "{resume_pkl}"')
             with dnnlib.util.open_url(resume_pkl) as f:
                 rG, rD, rGs = pickle.load(f)
@@ -224,8 +246,8 @@ def training_loop(
         progress_fn(0, total_kimg)
     tick_start_time = time.time()
     maintenance_time = tick_start_time - start_time
-    cur_nimg = last_nimg
     cur_tick = last_tick
+    cur_nimg = int(resume_kimg * 1000)
     tick_start_nimg = cur_nimg
     running_mb_counter = 0
 

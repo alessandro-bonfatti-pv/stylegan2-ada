@@ -21,6 +21,7 @@ from training import training_loop
 from training import dataset
 from metrics import metric_defaults
 
+
 #----------------------------------------------------------------------------
 
 class UserError(Exception):
@@ -35,10 +36,13 @@ def setup_training_options(
 
     # Training dataset.
     data       = None, # Training dataset (required): <path>
-    res        = None, # Override dataset resolution: <int>, default = highest available
+    use_raw = None,
+    min_h = None,
+    min_w = None,
+    res_log2 = None,
+
+    #res        = None, # Override dataset resolution: <int>, default = highest available
     mirror     = None, # Augment dataset with x-flips: <bool>, default = False
-    mirrory    = None, # Augment dataset with y-flips: <bool>, default = False
-    use_raw    = None, 
 
     # Metrics (not included in desc).
     metrics    = None, # List of metric names: [], ['fid50k_full'] (default), ...
@@ -54,6 +58,7 @@ def setup_training_options(
 
     # Discriminator augmentation.
     aug        = None, # Augmentation mode: 'ada' (default), 'noaug', 'fixed', 'adarv'
+    aug_init = None,
     p          = None, # Specify p for 'fixed' (required): <float>
     target     = None, # Override ADA target for 'ada' and 'adarv': <float>, default = depends on aug
     augpipe    = None, # Augmentation pipeline: 'blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc' (default), ..., 'bgcfnc'
@@ -65,13 +70,11 @@ def setup_training_options(
     # Transfer learning.
     resume     = None, # Load previous network: 'noresume' (default), 'ffhq256', 'ffhq512', 'ffhq1024', 'celebahq256', 'lsundog256', <file>, <url>
     freezed    = None, # Freeze-D: <int>, default = 0 discriminator layers
-    last_tick  = -1,
-    last_nimg  = 0,
+    last_tick  = -1
 ):
     # Initialize dicts.
     args = dnnlib.EasyDict()
     args.last_tick = last_tick
-    args.last_nimg = last_nimg
     args.G_args = dnnlib.EasyDict(func_name='training.networks.G_main')
     args.D_args = dnnlib.EasyDict(func_name='training.networks.D_main')
     args.G_opt_args = dnnlib.EasyDict(beta1=0.0, beta2=0.99)
@@ -109,32 +112,32 @@ def setup_training_options(
         raise UserError('--data must point to a directory containing *.tfrecords')
     desc = data_name
 
+
+
     with tf.Graph().as_default(), tflib.create_session().as_default(): # pylint: disable=not-context-manager
         args.train_dataset_args = dnnlib.EasyDict(path=data, max_label_size='full')
         args.train_dataset_args.use_raw = use_raw
         dataset_obj = dataset.load_dataset(**args.train_dataset_args) # try to load the data and see what comes out
-        args.train_dataset_args.resolution = dataset_obj.shape[-1] # be explicit about resolution
+        #args.train_dataset_args.resolution = dataset_obj.shape[-1] # be explicit about resolution
         args.train_dataset_args.max_label_size = dataset_obj.label_size # be explicit about label size
         validation_set_available = dataset_obj.has_validation_set
         dataset_obj.close()
         dataset_obj = None
 
-    if res is None:
-        res = args.train_dataset_args.resolution
+
+    ### Set res to the longest side
+
+    if min_w >= min_h:
+        res = min_w * 2**res_log2
     else:
-        assert isinstance(res, int)
-        if not (res >= 4 and res & (res - 1) == 0):
-            raise UserError('--res must be a power of two and at least 4')
-        if res > args.train_dataset_args.resolution:
-            raise UserError(f'--res cannot exceed maximum available resolution in the dataset ({args.train_dataset_args.resolution})')
-        desc += f'-res{res:d}'
-    args.train_dataset_args.resolution = res
+        res = min_h * 2**res_log2
 
     if mirror is None:
         mirror = False
-    assert isinstance(mirror, bool)
-    if mirror:
-        desc += '-mirror'
+    else:
+        assert isinstance(mirror, bool)
+        if mirror:
+            desc += '-mirror'
     args.train_dataset_args.mirror_augment = mirror
 
     if mirrory is None:
@@ -178,6 +181,9 @@ def setup_training_options(
     desc += f'-{cfg}'
 
     cfg_specs = {
+        'atari':     dict(ref_gpus=1,  kimg=25000,  mb=8, mbstd=4,  fmaps=0.5,   lrate=0.002,  gamma=1,   ema=20,  ramp=None, map=8),
+        'large':     dict(ref_gpus=1,  kimg=25000,  mb=8, mbstd=4,  fmaps=1,   lrate=0.002,  gamma=10,   ema=10,  ramp=None, map=8),
+        'v100_16gb':     dict(ref_gpus=1,  kimg=25000,  mb=4, mbstd=4,  fmaps=1,   lrate=0.002,  gamma=10,   ema=10,  ramp=None, map=8), # uses mixed-precision, 11GB GPU
         'auto':          dict(ref_gpus=-1, kimg=25000,  mb=-1, mbstd=-1, fmaps=-1,  lrate=-1,     gamma=-1,   ema=-1,  ramp=0.05, map=2), # populated dynamically based on 'gpus' and 'res'
         'aydao':     dict(ref_gpus=2,  kimg=25000,  mb=16, mbstd=8,  fmaps=1,   lrate=0.002,  gamma=10,   ema=10,  ramp=None, map=8), # uses mixed-precision, 11GB GPU
         '11gb-gpu':     dict(ref_gpus=1,  kimg=25000,  mb=4, mbstd=4,  fmaps=1,   lrate=0.002,  gamma=10,   ema=10,  ramp=None, map=8), # uses mixed-precision, 11GB GPU
@@ -225,6 +231,9 @@ def setup_training_options(
         # disable path length and style mixing regularization
         args.loss_args.pl_weight = 0
         args.G_args.style_mixing_prob = None
+    args.G_args.min_h = args.D_args.min_h = args.train_dataset_args.min_h = min_h
+    args.G_args.min_w = args.D_args.min_w = args.train_dataset_args.min_w = min_w
+    args.G_args.res_log2 = args.D_args.res_log2 = args.train_dataset_args.res_log2 = res_log2
 
         # double generator capacity
         args.G_args.fmap_base = 32 << 10
@@ -272,7 +281,6 @@ def setup_training_options(
     	args.loss_args.G_top_k = True
     	args.loss_args.G_top_k_gamma = topk
     	args.loss_args.G_top_k_frac = 0.5
-
     # ---------------------------------------------------
     # Discriminator augmentation: aug, p, target, augpipe
     # ---------------------------------------------------
@@ -305,12 +313,16 @@ def setup_training_options(
 
     if p is not None:
         assert isinstance(p, float)
-        if aug != 'fixed' and aug != 'ada':
+        if aug != 'fixed':
             raise UserError('--p can only be specified with --aug=fixed')
-        if not 0 <= p:
-            raise UserError('--p must be more than 0')
+        if not 0 <= p <= 1:
+            raise UserError('--p must be between 0 and 1')
         desc += f'-p{p:g}'
         args.augment_args.initial_strength = p
+
+    if aug_init is not None:
+        assert isinstance(aug_init, float)
+        args.augment_args.initial_strength = aug_init
 
     if target is not None:
         assert isinstance(target, float)
@@ -457,6 +469,11 @@ def setup_training_options(
     elif resume in resume_specs:
         desc += f'-resume{resume}'
         args.resume_pkl = resume_specs[resume] # predefined url
+    #####
+    elif resume =='latest':
+        desc += '-resumelatest'
+        args.resume_pkl = 'latest'
+    ######
     else:
         desc += '-resumecustom'
         args.resume_pkl = resume # custom path or url
@@ -499,7 +516,11 @@ def run_training(outdir, seed, dry_run, **hyperparam_options):
     print(f'Output directory:  {training_options.run_dir}')
     print(f'Training data:     {training_options.train_dataset_args.path}')
     print(f'Training length:   {training_options.total_kimg} kimg')
-    print(f'Resolution:        {training_options.train_dataset_args.resolution}')
+    res_h = training_options.train_dataset_args.min_h * 2**training_options.train_dataset_args.res_log2
+    res_w = training_options.train_dataset_args.min_w * 2**training_options.train_dataset_args.res_log2
+    print(f'Height res: {res_h}')
+    print(f'Width res: {res_w}')
+    #print(f'Resolution Height:        {training_options.train_dataset_args.resolution}')
     print(f'Number of GPUs:    {training_options.num_gpus}')
     print()
 
@@ -594,7 +615,12 @@ def main():
 
     group = parser.add_argument_group('training dataset')
     group.add_argument('--data',   help='Training dataset path (required)', metavar='PATH', required=True)
-    group.add_argument('--res',    help='Dataset resolution (default: highest available)', type=int, metavar='INT')
+    ###
+    group.add_argument('--use_raw', help='Use raw image dataset, i.e. created from create_from_images_raw (default: %(default)s)', default=True, metavar='BOOL', type=_str_to_bool)
+    group.add_argument('--min_h', help='lowest dim of height', default=4, type=int, metavar='INT')
+    group.add_argument('--min_w', help='lowest dim of width', default=4, type=int, metavar='INT')
+    group.add_argument('--res_log2', help='multiplier for image size, the training image size (height, width) should be (min_h * 2**res_log2, min_w * 2**res_log2)', default=4, type=int, metavar='INT')
+    #group.add_argument('--res',    help='Dataset resolution (default: highest available)', type=int, metavar='INT')
     group.add_argument('--mirror', help='Augment dataset with x-flips (default: false)', type=_str_to_bool, metavar='BOOL')
     group.add_argument('--mirrory', help='Augment dataset with y-flips (default: false)', type=_str_to_bool, metavar='BOOL')
     group.add_argument('--use-raw', help='Use raw image dataset, i.e. created from create_from_images_raw (default: %(default)s)', default=False, metavar='BOOL', type=_str_to_bool)
@@ -604,9 +630,9 @@ def main():
     group.add_argument('--metricdata', help='Dataset to evaluate metrics against (optional)', metavar='PATH')
 
     group = parser.add_argument_group('base config')
-    group.add_argument('--cfg',   help='Base config (default: auto)', choices=['auto', '11gb-gpu','11gb-gpu-complex', '24gb-gpu','24gb-gpu-complex', '48gb-gpu','48gb-2gpu', 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar', 'cifarbaseline', 'aydao'])
     group.add_argument('--lrate', help='Override learning rate', type=float, metavar='FLOAT')
     group.add_argument('--ttur', help='Use Two Time-Scale Update Rule (double learning rate for discriminator) (default: false)', type=_str_to_bool, metavar='BOOL')
+    group.add_argument('--cfg',   help='Base config (default: auto)', choices=['atari', 'large', 'v100_16gb', 'auto', '11gb-gpu','11gb-gpu-complex', '24gb-gpu','24gb-gpu-complex', '48gb-gpu','48gb-2gpu', 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar', 'cifarbaseline', 'aydao'])
     group.add_argument('--gamma', help='Override R1 gamma', type=float, metavar='FLOAT')
     group.add_argument('--kimg',  help='Override training duration', type=int, metavar='INT')
     group.add_argument('--topk',  help='utilize top-k training', type=int, metavar='FLOAT')
@@ -614,6 +640,7 @@ def main():
     group = parser.add_argument_group('discriminator augmentation')
     group.add_argument('--aug',    help='Augmentation mode (default: ada)', choices=['noaug', 'ada', 'fixed', 'adarv'])
     group.add_argument('--p',      help='Specify augmentation probability for --aug=fixed', type=float, metavar='FLOAT')
+    group.add_argument('--aug_init',      help='Specify initial augmentation probability', type=float, metavar='FLOAT')
     group.add_argument('--target', help='Override ADA target for --aug=ada and --aug=adarv', type=float)
     group.add_argument('--augpipe', help='Augmentation pipeline (default: bgc)', choices=['prototype','blit', 'geom', 'color', 'filter', 'noise', 'cutout', 'bg', 'bgc', 'bgcf', 'bgcfn', 'bgcfnc'])
 
@@ -625,7 +652,6 @@ def main():
     group.add_argument('--resume',  help='Resume from network pickle (default: noresume)')
     group.add_argument('--freezed', help='Freeze-D (default: 0 discriminator layers)', type=int, metavar='INT')
     group.add_argument('--last_tick',    help='Last executed Tick', type=int, metavar='INT', default=-1)
-    group.add_argument('--last_nimg',    help='Lask number of processed images', type=int, metavar='INT', default=0)
 
     args = parser.parse_args()
     try:
