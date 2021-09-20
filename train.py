@@ -43,6 +43,7 @@ def setup_training_options(
 
     #res        = None, # Override dataset resolution: <int>, default = highest available
     mirror     = None, # Augment dataset with x-flips: <bool>, default = False
+    mirrory    = None, # Augment dataset with y-flips: <bool>, default = False
 
     # Metrics (not included in desc).
     metrics    = None, # List of metric names: [], ['fid50k_full'] (default), ...
