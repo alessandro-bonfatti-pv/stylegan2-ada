@@ -226,15 +226,15 @@ def setup_training_options(
     args.G_args.mapping_layers = spec.map
     args.G_args.num_fp16_res = args.D_args.num_fp16_res = 4 # enable mixed-precision training
     args.G_args.conv_clamp = args.D_args.conv_clamp = 256 # clamp activations to avoid float16 overflow
+    args.G_args.min_h = args.D_args.min_h = args.train_dataset_args.min_h = min_h
+    args.G_args.min_w = args.D_args.min_w = args.train_dataset_args.min_w = min_w
+    args.G_args.res_log2 = args.D_args.res_log2 = args.train_dataset_args.res_log2 = res_log2
 
     if cfg == 'aydao':
         # disable path length and style mixing regularization
         args.loss_args.pl_weight = 0
         args.G_args.style_mixing_prob = None
-    args.G_args.min_h = args.D_args.min_h = args.train_dataset_args.min_h = min_h
-    args.G_args.min_w = args.D_args.min_w = args.train_dataset_args.min_w = min_w
-    args.G_args.res_log2 = args.D_args.res_log2 = args.train_dataset_args.res_log2 = res_log2
-
+    
         # double generator capacity
         args.G_args.fmap_base = 32 << 10
         args.G_args.fmap_max = 1024
