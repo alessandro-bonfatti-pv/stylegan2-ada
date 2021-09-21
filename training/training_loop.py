@@ -145,6 +145,8 @@ def training_loop(
             #####
             if resume_pkl == 'latest':
                 resume_pkl, resume_kimg = locate_latest_pkl(run_dir)
+            else:
+                _, resume_kimg = locate_latest_pkl(run_dir)
             #####
             print(f'Resuming from "{resume_pkl}"')
             with dnnlib.util.open_url(resume_pkl) as f:
