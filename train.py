@@ -343,7 +343,7 @@ def setup_training_options(
         desc += f'-{augpipe}'
 
     augpipe_specs = {
-        'prototype':    dict(xflip=1, scale=1, aniso=1, xfrac=1, brightness=1, contrast=1),
+        'prototype':    dict(xint=1, xflip=1, scale=1, aniso=1, xfrac=1, brightness=1, contrast=1, noise=1, cutout=1),
         'blit':     dict(xflip=1, rotate90=1, xint=1),
         'geom':     dict(scale=1, rotate=1, aniso=1, xfrac=1),
         'color':    dict(brightness=1, contrast=1, lumaflip=1, hue=1, saturation=1),
